@@ -1,0 +1,68 @@
+========================================================================
+AEGIS NEXUS PRO - COMPLETE TESTING PROTOCOL
+========================================================================
+
+Follow these steps to verify that every feature of the Smart Hotspot 
+Controller is functioning perfectly on your mobile hardware.
+
+------------------------------------------------------------------------
+PHASE 1: THE HOSTING GATEWAY (First Android Phone)
+------------------------------------------------------------------------
+1. Open the "Aegis Nexus Pro" app.
+2. Ensure your phone's "Mobile Hotspot" is turned ON in system settings.
+3. Tap the "START" button at the top right (turns red and says STOP).
+4. Look at the "Gateway Setup" card. It should show an IP and Port.
+   (e.g., 192.168.43.1 at port 8080)
+
+------------------------------------------------------------------------
+PHASE 2: THE CLIENT BRIDGE (Second Android Phone / Laptop)
+------------------------------------------------------------------------
+1. Connect the Client to your host phone's Wi-Fi.
+2. Go into the Wi-Fi settings for that connection:
+   - Change Proxy to "MANUAL".
+   - Proxy Hostname: (The IP from the app, e.g., 192.168.43.1)
+   - Proxy Port: 8080
+3. Save and wait a few seconds.
+
+------------------------------------------------------------------------
+PHASE 3: FEATURE TEST - REAL-TIME MONITORING
+------------------------------------------------------------------------
+1. On the Client Phone, open Chrome or YouTube and load a video.
+2. On the Host Phone (the app), watch:
+   - "Throughput Monitor": The blue line graph must spike to show KB/s.
+   - "Usage Distribution": A new slice should appear in the Pie Chart for that client IP.
+   - "Active Connections": A new tile for the client IP will appear.
+
+------------------------------------------------------------------------
+PHASE 4: FEATURE TEST - SPEED RESTRICTION (THROTTLE)
+------------------------------------------------------------------------
+1. Start a video on the Client Phone.
+2. On the Host Phone app, expand the Client's tile.
+3. Tap "THROTTLE" (turns yellow/amber).
+4. VERIFY: The client's video should start to buffer or slow down. 
+   On the host app, look at the Throughput Monitor - it should flatten 
+   out at a low speed (~125KB/s or 1MB/s).
+5. Tap "UNLIMIT" to restore full speed.
+
+------------------------------------------------------------------------
+PHASE 5: FEATURE TEST - FIREWALL SECURITY (BLOCK)
+------------------------------------------------------------------------
+1. On the Host Phone app, tap the Blue Shield icon.
+2. Type "facebook.com" and tap "Block".
+3. On the Client Phone, try to open facebook.com in Chrome.
+4. VERIFY: Facebook fails to load, but other sites like google.com or 
+   wikipedia.com still load perfectly.
+
+------------------------------------------------------------------------
+PHASE 6: FEATURE TEST - DATA QUOTA (AUTO KILL-SWITCH)
+------------------------------------------------------------------------
+1. On the Host Phone app, expand the Client's tile.
+2. Tap "50MB" (turns indigo).
+3. Start a large download on the client.
+4. VERIFY: Once the client's "Total MB" reaches 50MB, their internet 
+   connection must instantly stop working.
+5. Tap "RESET" to restore their connection.
+
+========================================================================
+TEST COMPLETE: If all 6 phases pass, your controller is 100% STABLE!
+========================================================================

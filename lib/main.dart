@@ -1,0 +1,367 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'providers/client_manager.dart';
+import 'services/proxy_server.dart';
+import 'services/allocation_engine.dart';
+import 'models/client_device.dart';
+
+void main() {
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => ClientManager(),
+      child: const SmartHotspotApp(),
+    ),
+  );
+}
+
+class SmartHotspotApp extends StatelessWidget {
+  const SmartHotspotApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Aegis Nexus Pro',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(
+        brightness: Brightness.dark,
+        scaffoldBackgroundColor: const Color(0xFF020617),
+        primaryColor: const Color(0xFF38BDF8),
+        colorScheme: const ColorScheme.dark(
+          primary: Color(0xFF38BDF8),
+          secondary: Color(0xFF818CF8),
+          surface: Color(0xFF0F172A),
+          background: Color(0xFF020617),
+        ),
+        cardColor: const Color(0xFF0F172A),
+        textTheme: const TextTheme(
+          titleLarge: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: -0.5),
+          bodyLarge: TextStyle(color: Color(0xFFCBD5E1)),
+          bodyMedium: TextStyle(color: Color(0xFF94A3B8)),
+        ),
+        useMaterial3: true,
+      ),
+      home: const DashboardScreen(),
+    );
+  }
+}
+
+class DashboardScreen extends StatefulWidget {
+  const DashboardScreen({super.key});
+
+  @override
+  State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  ProxyServer? _proxyServer;
+  AllocationEngine? _allocationEngine;
+  bool _isRunning = false;
+  String _localIp = "Unknown";
+  final TextEditingController _domainController = TextEditingController();
+
+  List<FlSpot> _spots = [];
+  double _timeIndex = 0;
+  int _lastTotalData = 0;
+  Timer? _graphTimer;
+  
+  final List<Color> _clientColors = [
+    const Color(0xFF38BDF8),
+    const Color(0xFF818CF8),
+    const Color(0xFF10B981),
+    const Color(0xFFF59E0B),
+    const Color(0xFFEC4899),
+    const Color(0xFF8B5CF6),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _getIP();
+    _graphTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      final manager = Provider.of<ClientManager>(context, listen: false);
+      int currentData = manager.totalBytesDownloaded + manager.totalBytesUploaded;
+      int delta = currentData - _lastTotalData;
+      _lastTotalData = currentData;
+      
+      setState(() {
+        _spots.add(FlSpot(_timeIndex, (delta.toDouble() / 1024).clamp(0, 50000))); // KB/s
+        if (_spots.length > 50) _spots.removeAt(0);
+        _timeIndex += 1;
+      });
+    });
+  }
+  
+  Future<void> _getIP() async {
+    try {
+      final interfaces = await NetworkInterface.list();
+      for (var interface in interfaces) {
+        for (var addr in interface.addresses) {
+          if (addr.type == InternetAddressType.IPv4 && !addr.isLoopback) {
+            // Android hotspots usually result in a specific IP range or interface names like ap0, wlan0
+            if (mounted) setState(() { _localIp = addr.address; });
+            return;
+          }
+        }
+      }
+      // If we got here, we didn't find a non-loopback IPv4
+      if (mounted && _localIp == "Unknown") {
+        setState(() { _localIp = "Detecting..."; });
+        Timer(const Duration(seconds: 2), _getIP); // Retry in 2s
+      }
+    } catch (e) {
+      print("IP Detection failed: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    _proxyServer?.stop();
+    _allocationEngine?.stop();
+    _graphTimer?.cancel();
+    _domainController.dispose();
+    super.dispose();
+  }
+
+  void _toggleProxy(ClientManager manager) async {
+    if (_isRunning) {
+      _proxyServer?.stop();
+      _allocationEngine?.stop();
+      setState(() => _isRunning = false);
+    } else {
+      await _getIP();
+      _proxyServer = ProxyServer(port: 8080, clientManager: manager);
+      _allocationEngine = AllocationEngine(manager);
+      await _proxyServer!.start();
+      _allocationEngine!.start();
+      setState(() => _isRunning = true);
+    }
+  }
+
+  void _showBlockDomainDialog(ClientManager manager) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF0F172A),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Text('Firewall Ruleset', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: _domainController,
+          decoration: InputDecoration(
+            hintText: 'e.g. facebook.com',
+            hintStyle: const TextStyle(color: Colors.white24),
+            filled: true,
+            fillColor: const Color(0xFF020617),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+            onPressed: () {
+              if (_domainController.text.isNotEmpty) {
+                manager.securityRules.blockDomain(_domainController.text);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Aegis: Blocked domain ${_domainController.text}'), behavior: SnackBarBehavior.floating));
+                _domainController.clear();
+              }
+              Navigator.pop(context);
+            },
+            child: const Text('Block'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final manager = Provider.of<ClientManager>(context);
+    final totalDwnMb = manager.totalBytesDownloaded / (1024 * 1024);
+    final totalUpMb = manager.totalBytesUploaded / (1024 * 1024);
+
+    return Scaffold(
+      body: SafeArea(
+        child: CustomScrollView(
+          physics: const BouncingScrollPhysics(),
+          slivers: [
+            SliverAppBar(
+              expandedHeight: 80.0,
+              floating: true,
+              backgroundColor: Colors.transparent,
+              flexibleSpace: FlexibleSpaceBar(
+                titlePadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                title: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Aegis Nexus Pro', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.white)),
+                    _buildPowerButton(manager),
+                  ],
+                ),
+              ),
+            ),
+            if (_isRunning) SliverToBoxAdapter(child: _buildConfigCard()),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  children: [
+                    _buildStatsRow(totalDwnMb, totalUpMb),
+                    const SizedBox(height: 32),
+                    _buildSectionHeader('Live Throughput (KB/s)', Icons.analytics_outlined, action: IconButton(icon: const Icon(Icons.security_outlined, color: Color(0xFF38BDF8)), onPressed: () => _showBlockDomainDialog(manager))),
+                    const SizedBox(height: 16),
+                    _buildLineChartCard(),
+                    const SizedBox(height: 32),
+                    _buildSectionHeader('Infrastructure Distribution', Icons.pie_chart_outline_rounded),
+                    const SizedBox(height: 16),
+                    _buildDistributionPieChart(manager),
+                    const SizedBox(height: 32),
+                    _buildSectionHeader('Current Subscriptions', Icons.wifi_protected_setup_rounded),
+                    const SizedBox(height: 16),
+                  ],
+                ),
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 24.0),
+              sliver: SliverList(
+                delegate: SliverChildBuilderDelegate(
+                  (context, index) {
+                    final client = manager.clients[index];
+                    final color = _clientColors[index % _clientColors.length];
+                    return _buildClientExpandableTile(client, manager, color);
+                  },
+                  childCount: manager.clients.length,
+                ),
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPowerButton(ClientManager manager) {
+    return GestureDetector(
+      onTap: () => _toggleProxy(manager),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(30),
+          gradient: LinearGradient(colors: _isRunning ? [const Color(0xFFEF4444), const Color(0xFF7F1D1D)] : [const Color(0xFF10B981), const Color(0xFF064E3B)]),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.power_settings_new, size: 16, color: Colors.white),
+            const SizedBox(width: 6),
+            Text(_isRunning ? "STOP" : "START", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.white)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildConfigCard() {
+    bool hasIp = _localIp != "Unknown" && _localIp != "Detecting...";
+    String displayIp = hasIp ? _localIp : "192.168.43.1"; // 192.168.43.1 is the most common Android AP IP
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(color: const Color(0xFF38BDF8).withOpacity(0.05), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF38BDF8).withOpacity(0.2))),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.hub_outlined, color: Color(0xFF38BDF8), size: 18),
+                    const SizedBox(width: 10),
+                    const Text("Gateway Setup", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF38BDF8))),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(color: Color(0xFF64748B), fontSize: 12, height: 1.4),
+                    children: [
+                      const TextSpan(text: "Set client proxy to "),
+                      TextSpan(text: displayIp, style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white)),
+                      const TextSpan(text: " at port "),
+                      const TextSpan(text: "8080", style: const TextStyle(fontWeight: FontWeight.w900, color: Colors.white)),
+                    ]
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded, color: Color(0xFF38BDF8), size: 20),
+            onPressed: () => _getIP(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon, {Widget? action}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(children: [Icon(icon, color: const Color(0xFF475569), size: 20), const SizedBox(width: 12), Text(title, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFFE2E8F0)))]),
+        if (action != null) action,
+      ],
+    );
+  }
+
+  Widget _buildStatsRow(double dwn, double up) {
+    return Row(children: [_buildStatCard('DOWNSTREAM', '${dwn.toStringAsFixed(1)} MB', Icons.keyboard_double_arrow_down_rounded, const Color(0xFF38BDF8)), const SizedBox(width: 16), _buildStatCard('UPSTREAM', '${up.toStringAsFixed(1)} MB', Icons.keyboard_double_arrow_up_rounded, const Color(0xFF818CF8))]);
+  }
+
+  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+    return Expanded(child: Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20), decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.white.withOpacity(0.04))), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(children: [Icon(icon, color: color, size: 16), const SizedBox(width: 8), Text(label, style: TextStyle(color: color.withOpacity(0.6), fontSize: 10, fontWeight: FontWeight.w900))]), const SizedBox(height: 12), Text(value, style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.w900))])));
+  }
+
+  Widget _buildLineChartCard() {
+    return Container(height: 180, padding: const EdgeInsets.only(top: 24, right: 24, bottom: 8), decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(24), border: Border.all(color: Colors.white.withOpacity(0.04))), child: LineChart(LineChartData(gridData: FlGridData(show: true, drawVerticalLine: false, horizontalInterval: 100, getDrawingHorizontalLine: (v) => FlLine(color: Colors.white.withOpacity(0.03), strokeWidth: 1)), titlesData: const FlTitlesData(show: false), borderData: FlBorderData(show: false), lineBarsData: [LineChartBarData(spots: _spots.isEmpty ? [const FlSpot(0, 0)] : _spots, isCurved: true, color: const Color(0xFF38BDF8), barWidth: 2, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, gradient: LinearGradient(colors: [const Color(0xFF38BDF8).withOpacity(0.15), Colors.transparent], begin: Alignment.topCenter, end: Alignment.bottomCenter)))])));
+  }
+
+  Widget _buildDistributionPieChart(ClientManager manager) {
+    if (manager.clients.isEmpty) return Container(height: 120, alignment: Alignment.center, child: const Text('No Encapsulated Traffic', style: TextStyle(color: Color(0xFF334155), fontSize: 11)));
+    int totalData = manager.totalBytesDownloaded + manager.totalBytesUploaded;
+    if (totalData == 0) totalData = 1;
+    List<PieChartSectionData> sections = [];
+    List<Widget> legends = [];
+    for (int i = 0; i < manager.clients.length; i++) {
+      final client = manager.clients[i];
+      final cTotal = client.bytesDownloaded + client.bytesUploaded;
+      if (cTotal == 0) continue;
+      final color = _clientColors[i % _clientColors.length];
+      double percentage = (cTotal / totalData) * 100;
+      sections.add(PieChartSectionData(color: color, value: percentage, title: '${percentage.toStringAsFixed(0)}%', radius: 40, titleStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white)));
+      legends.add(Padding(padding: const EdgeInsets.symmetric(vertical: 1.0), child: Row(children: [Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)), const SizedBox(width: 8), Text('Node:${client.ipAddress.split('.').last}', style: const TextStyle(color: Color(0xFF64748B), fontSize: 11))])));
+    }
+    return Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(24)), child: Row(children: [Expanded(flex: 3, child: SizedBox(height: 100, child: PieChart(PieChartData(sectionsSpace: 2, centerSpaceRadius: 20, sections: sections)))), const SizedBox(width: 20), Expanded(flex: 2, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: legends))]));
+  }
+
+  Widget _buildClientExpandableTile(ClientDevice client, ClientManager manager, Color accentColor) {
+    final cDwnMb = client.bytesDownloaded / (1024 * 1024);
+    final cUpMb = client.bytesUploaded / (1024 * 1024);
+    final isThrottled = client.downloadLimitKbps > 0;
+    return Container(margin: const EdgeInsets.only(bottom: 12), decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(20), border: Border.all(color: client.isBlocked ? Colors.red.withOpacity(0.2) : Colors.white.withOpacity(0.04))), child: Theme(data: Theme.of(context).copyWith(dividerColor: Colors.transparent), child: ExpansionTile(tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4), leading: Icon(Icons.settings_input_antenna_rounded, color: client.isBlocked ? Colors.red : accentColor, size: 28), title: Text(client.ipAddress, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)), subtitle: Text('${(cDwnMb + cUpMb).toStringAsFixed(1)} MB • ${isThrottled ? "RESTRICTED" : "UNBOUND"}', style: TextStyle(color: isThrottled ? Colors.amber : const Color(0xFF475569), fontSize: 11, fontWeight: FontWeight.w900)), children: [Padding(padding: const EdgeInsets.all(20), child: Row(mainAxisAlignment: MainAxisAlignment.spaceEvenly, children: [_buildControlBtn(client.isBlocked ? Icons.security_rounded : Icons.block_flipped, client.isBlocked ? 'FREE' : 'STOP', client.isBlocked ? Colors.green : Colors.red, () => manager.setBlocked(client.ipAddress, !client.isBlocked)), _buildControlBtn(Icons.speed_rounded, isThrottled ? 'UNLIMIT' : 'THROTTLE', isThrottled ? Colors.blue : Colors.amber, () { if (isThrottled) manager.setLimits(client.ipAddress, 0, 0); else manager.setLimits(client.ipAddress, 1024, 1024); }), _buildControlBtn(Icons.timer_off_outlined, client.totalDataLimitDwnBytes > 0 ? 'RESET' : '50MB', Colors.indigo, () { if (client.totalDataLimitDwnBytes > 0) manager.setDataQuota(client.ipAddress, 0, 0); else manager.setDataQuota(client.ipAddress, 50 * 1024 * 1024, 0); })]))])));
+  }
+
+  Widget _buildControlBtn(IconData icon, String label, Color color, VoidCallback onTap) {
+    return InkWell(onTap: onTap, child: Column(children: [Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: color.withOpacity(0.1), shape: BoxShape.circle), child: Icon(icon, color: color, size: 20)), const SizedBox(height: 8), Text(label, style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.w900))]));
+  }
+}
