@@ -209,44 +209,6 @@ To block a domain across all clients, tap the **shield icon** in the **Live Thro
 
 ---
 
-## Suggested Improvements
-
-### Critical / Functional
-
-1. **Foreground Service for proxy persistence** — Currently the proxy server runs on the main Flutter isolate. Android will kill it when the app is backgrounded. Wrapping it in a `ForegroundService` (with a persistent notification) via a native Android plugin or `flutter_foreground_task` is essential for real-world use.
-
-2. **Configurable throttle value** — The throttle is hardcoded to 1024 Kbps. A slider or text input per client would make this far more useful.
-
-3. **Configurable data quota** — The quota is hardcoded to 50 MB. It should be user-settable.
-
-4. **Persist blocked domains** — The `SecurityRulesManager` uses an in-memory `Set`. All blocked domains are lost when the app restarts. Use `shared_preferences` to persist them.
-
-5. **Show blocked domains list** — There is currently no UI to view or remove blocked domains once added.
-
-6. **Auto-detect hotspot IP more reliably** — The IP detection logic returns the first non-loopback IPv4 address. On some devices the hotspot interface (e.g., `ap0`) may not always be the first result. Filtering by interface name or checking for the `192.168.43.x` subnet would be more reliable.
-
-### UX / UI
-
-7. **Device name resolution** — Clients are shown by raw IP (e.g., `192.168.43.x`). Attempting mDNS/DNS reverse lookup or allowing the user to assign friendly names would greatly improve readability.
-
-8. **AllocationEngine auto mode toggle** — The `AllocationEngine` supports auto mode (`toggleAutoMode`) but there is no UI switch exposed for it. Adding a toggle in settings would complete this feature.
-
-9. **Session history / logging** — No data is persisted between proxy sessions. A simple log of session totals per IP would be valuable.
-
-10. **Onboarding flow** — First-time users need to know to configure the proxy on client devices. A one-time guided setup dialog would reduce friction significantly.
-
-### Code Quality
-
-11. **Split `main.dart`** — At ~450 lines, `main.dart` contains the entire UI. Extracting widgets like `_buildClientExpandableTile`, `_buildLineChartCard`, and `_buildDistributionPieChart` into separate files under `lib/widgets/` would improve maintainability.
-
-12. **Replace `print()` with a proper logger** — The proxy server uses `print()` for error logging. Using the `logging` package or `flutter/foundation.dart`'s `debugPrint` and a structured logger would be better practice.
-
-13. **Add unit tests for core logic** — `AllocationEngine`, `SecurityRulesManager`, and `ClientDevice.isLimitExceeded()` are all pure Dart and straightforward to unit test. The existing `widget_test.dart` is the default Flutter placeholder.
-
-14. **Handle IPv6** — The proxy server binds on `0.0.0.0` (IPv4 only). While Android hotspots typically assign IPv4, adding IPv6 support (`InternetAddress.anyIPv6`) would be more robust.
-
----
-
 ## Known Limitations
 
 - **Android only** — iOS does not expose network interfaces in the same way and does not support this proxy approach.
