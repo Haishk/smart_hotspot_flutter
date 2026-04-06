@@ -15,7 +15,6 @@
 - [Installation & Setup](#installation--setup)
 - [How to Use](#how-to-use)
 - [Testing Protocol](#testing-protocol)
-- [Suggested Improvements](#suggested-improvements)
 - [Known Limitations](#known-limitations)
 - [Dependencies](#dependencies)
 
