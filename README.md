@@ -229,6 +229,3 @@ To block a domain across all clients, tap the **shield icon** in the **Live Thro
 
 ---
 
-## License
-
-This project is private and not published to pub.dev (`publish_to: none`). Add a `LICENSE` file if you intend to open-source it.
