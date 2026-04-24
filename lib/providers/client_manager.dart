@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/client_device.dart';
@@ -16,6 +17,9 @@ class ClientManager extends ChangeNotifier {
   bool _needsNotify = false;
 
   static const String _nicknamesKey = 'device_nicknames';
+  static const String _secretKey = 'proxy_secret';
+
+  String proxySecret = '';
 
   ClientManager() {
     _init();
@@ -26,6 +30,19 @@ class ClientManager extends ChangeNotifier {
     await securityRules.loadFromPrefs();
     // Load persisted device nicknames
     await _loadNicknames();
+    await _loadSecret();
+    notifyListeners();
+  }
+
+  Future<void> _loadSecret() async {
+    final prefs = await SharedPreferences.getInstance();
+    proxySecret = prefs.getString(_secretKey) ?? 'admin123';
+  }
+
+  Future<void> setProxySecret(String secret) async {
+    final prefs = await SharedPreferences.getInstance();
+    proxySecret = secret.trim().isEmpty ? 'admin123' : secret.trim();
+    await prefs.setString(_secretKey, proxySecret);
     notifyListeners();
   }
 
@@ -64,24 +81,48 @@ class ClientManager extends ChangeNotifier {
 
   List<ClientDevice> get clients => _clients.values.toList();
 
-  ClientDevice? getClient(String ip) => _clients[ip];
+  ClientDevice? getClient(String id) => _clients[id];
+
+  Future<String> getMacFromIp(String ip) async {
+    try {
+      final file = File('/proc/net/arp');
+      if (await file.exists()) {
+        final lines = await file.readAsLines();
+        for (var line in lines) {
+          if (line.startsWith('$ip ')) {
+            final parts = line.split(RegExp(r'\s+'));
+            if (parts.length >= 4) return parts[3];
+          }
+        }
+      }
+    } catch (_) {}
+    return "Unknown";
+  }
+
+  final Map<String, DateTime> _firstSeen = {};
 
   void addOrUpdateClient(String ipAddress, String macAddress) {
-    if (!_clients.containsKey(ipAddress)) {
+    String id = macAddress.isNotEmpty && macAddress != "Unknown" ? macAddress : ipAddress;
+    if (!_clients.containsKey(id)) {
+      final now = DateTime.now();
+      _firstSeen.removeWhere((_, t) => now.difference(t).inSeconds > 5);
+      if (_firstSeen.length >= 10) return; // Rate-limit new registrations
+      _firstSeen[ipAddress] = now;
+
       final device = ClientDevice(ipAddress: ipAddress, macAddress: macAddress);
       // Apply any pre-seeded nickname
-      if (_pendingNicknames.containsKey(ipAddress)) {
-        device.deviceName = _pendingNicknames.remove(ipAddress)!;
+      if (_pendingNicknames.containsKey(id)) {
+        device.deviceName = _pendingNicknames.remove(id)!;
       }
-      _clients[ipAddress] = device;
+      _clients[id] = device;
       _scheduleNotify();
     }
   }
 
-  void updateStats(String ipAddress, int dwnBytes, int upBytes) {
+  void updateStats(String id, int dwnBytes, int upBytes) {
     if (dwnBytes <= 0 && upBytes <= 0) return;
 
-    var client = _clients[ipAddress];
+    var client = _clients[id];
     if (client != null) {
       client.bytesDownloaded += dwnBytes;
       client.bytesUploaded += upBytes;
@@ -105,16 +146,16 @@ class ClientManager extends ChangeNotifier {
     }
   }
 
-  void setBlocked(String ipAddress, bool blocked) {
-    var client = _clients[ipAddress];
+  void setBlocked(String id, bool blocked) {
+    var client = _clients[id];
     if (client != null) {
       client.isBlocked = blocked;
       notifyListeners();
     }
   }
 
-  void setLimits(String ipAddress, int downloadLimitKbps, int uploadLimitKbps) {
-    var client = _clients[ipAddress];
+  void setLimits(String id, int downloadLimitKbps, int uploadLimitKbps) {
+    var client = _clients[id];
     if (client != null) {
       client.downloadLimitKbps = downloadLimitKbps;
       client.uploadLimitKbps = uploadLimitKbps;
@@ -122,8 +163,8 @@ class ClientManager extends ChangeNotifier {
     }
   }
 
-  void setDataQuota(String ipAddress, int limitDwnBytes, int limitUpBytes) {
-    var client = _clients[ipAddress];
+  void setDataQuota(String id, int limitDwnBytes, int limitUpBytes) {
+    var client = _clients[id];
     if (client != null) {
       client.totalDataLimitDwnBytes = limitDwnBytes;
       client.totalDataLimitUpBytes = limitUpBytes;
@@ -132,8 +173,8 @@ class ClientManager extends ChangeNotifier {
   }
 
   /// Set a human-readable nickname for a device and persist it.
-  Future<void> setDeviceName(String ipAddress, String name) async {
-    var client = _clients[ipAddress];
+  Future<void> setDeviceName(String id, String name) async {
+    var client = _clients[id];
     if (client != null) {
       client.deviceName = name.trim().isEmpty ? 'Unknown Device' : name.trim();
       notifyListeners();

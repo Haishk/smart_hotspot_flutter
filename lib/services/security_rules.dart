@@ -35,7 +35,7 @@ class SecurityRulesManager {
 
   bool isDomainBlocked(String domain) {
     final lower = domain.toLowerCase();
-    return _blockedDomains.any((b) => lower.contains(b));
+    return _blockedDomains.any((b) => lower == b || lower.endsWith('.$b'));
   }
 
   List<String> getAllBlockedDomains() => _blockedDomains.toList()..sort();
