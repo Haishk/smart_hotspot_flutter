@@ -10,7 +10,6 @@ class ClientDevice {
   int bytesDownloaded;
   int bytesUploaded;
   int priority;
-  int activeConnections;
 
   ClientDevice({
     required this.ipAddress,
@@ -24,10 +23,7 @@ class ClientDevice {
     this.bytesDownloaded = 0,
     this.bytesUploaded = 0,
     this.priority = 1,
-    this.activeConnections = 0,
   });
-
-  String get id => macAddress.isNotEmpty && macAddress != "Unknown" ? macAddress : ipAddress;
 
   bool isLimitExceeded() {
     if (totalDataLimitDwnBytes > 0 && bytesDownloaded >= totalDataLimitDwnBytes) return true;

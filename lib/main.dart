@@ -118,8 +118,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String _localIp = 'Unknown';
   final TextEditingController _domainController =
       TextEditingController();
-  final TextEditingController _secretController =
-      TextEditingController();
 
   List<FlSpot> _spots = [];
   double _timeIndex = 0;
@@ -139,7 +137,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
   void initState() {
     super.initState();
     _getIP();
-    _loadSecret();
     _graphTimer =
         Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!mounted) return;
@@ -179,22 +176,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
-  void _loadSecret() {
-    final manager = Provider.of<ClientManager>(context, listen: false);
-    // Wait for init to complete, then sync controller
-    Future.delayed(const Duration(milliseconds: 500), () {
-      if (mounted) {
-        _secretController.text = manager.proxySecret;
-      }
-    });
-  }
-
   @override
   void dispose() {
     _stopProxy();
     _graphTimer?.cancel();
     _domainController.dispose();
-    _secretController.dispose();
     super.dispose();
   }
 
@@ -240,9 +226,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       setState(() => _isRunning = false);
     } else {
       await _getIP();
-      final bindAddr = _localIp != 'Unknown' && _localIp != 'Detecting...' ? _localIp : '192.168.43.1';
       _proxyServer =
-          ProxyServer(port: 8080, bindIp: bindAddr, clientManager: manager);
+          ProxyServer(port: 8080, clientManager: manager);
       _allocationEngine = AllocationEngine(manager);
       await _proxyServer!.start();
       _allocationEngine!.start();
@@ -316,7 +301,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onPressed: () {
               final val = int.tryParse(ctrl.text.trim());
               if (val != null && val > 0) {
-                manager.setLimits(client.id, val, val);
+                manager.setLimits(client.ipAddress, val, val);
                 ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                         content: Text(
@@ -390,7 +375,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               final val = int.tryParse(ctrl.text.trim());
               if (val != null && val > 0) {
                 manager.setDataQuota(
-                    client.id, val * 1024 * 1024, 0);
+                    client.ipAddress, val * 1024 * 1024, 0);
                 ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
                         content: Text(
@@ -448,7 +433,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 foregroundColor: Colors.black),
             onPressed: () {
               manager.setDeviceName(
-                  client.id, ctrl.text.trim());
+                  client.ipAddress, ctrl.text.trim());
               Navigator.pop(ctx);
             },
             child: const Text('Save'),
@@ -606,7 +591,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hasIp =
         _localIp != 'Unknown' && _localIp != 'Detecting...';
     final displayIp = hasIp ? _localIp : '192.168.43.1';
-    final manager = Provider.of<ClientManager>(context, listen: false);
 
     return Container(
       margin:
@@ -618,131 +602,53 @@ class _DashboardScreenState extends State<DashboardScreen> {
           border: Border.all(
               color:
                   const Color(0xFF38BDF8).withOpacity(0.2))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      const Icon(Icons.hub_outlined,
-                          color: Color(0xFF38BDF8), size: 18),
-                      const SizedBox(width: 10),
-                      const Text('Gateway Setup',
-                          style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 13,
-                              color: Color(0xFF38BDF8))),
-                    ]),
-                    const SizedBox(height: 8),
-                    RichText(
-                      text: TextSpan(
-                        style: const TextStyle(
-                            color: Color(0xFF64748B),
-                            fontSize: 12,
-                            height: 1.4),
-                        children: [
-                          const TextSpan(
-                              text: 'Set client proxy to '),
-                          TextSpan(
-                              text: displayIp,
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white)),
-                          const TextSpan(text: ' at port '),
-                          const TextSpan(
-                              text: '8080',
-                              style: TextStyle(
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white)),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded,
-                    color: Color(0xFF38BDF8), size: 20),
-                onPressed: _getIP,
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(children: [
-            const Icon(Icons.lock_outline,
-                color: Color(0xFF818CF8), size: 16),
-            const SizedBox(width: 8),
-            const Text('Proxy Secret',
-                style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF818CF8))),
-          ]),
-          const SizedBox(height: 6),
-          Row(children: [
-            Expanded(
-              child: TextField(
-                controller: _secretController,
-                style: const TextStyle(fontSize: 13, color: Colors.white),
-                decoration: InputDecoration(
-                  isDense: true,
-                  hintText: 'Enter proxy password',
-                  hintStyle: const TextStyle(color: Colors.white24, fontSize: 12),
-                  filled: true,
-                  fillColor: const Color(0xFF020617),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF818CF8),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 10),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(10))),
-              onPressed: () {
-                manager.setProxySecret(_secretController.text);
-                ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Proxy secret updated'),
-                        behavior: SnackBarBehavior.floating));
-              },
-              child: const Text('Save', style: TextStyle(fontSize: 12)),
-            ),
-          ]),
-          const SizedBox(height: 6),
-          RichText(
-            text: const TextSpan(
-              style: TextStyle(
-                  color: Color(0xFF475569),
-                  fontSize: 10,
-                  height: 1.3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                TextSpan(text: 'Client auth: '),
-                TextSpan(
-                    text: 'admin',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF94A3B8))),
-                TextSpan(text: ' / '),
-                TextSpan(
-                    text: '<secret above>',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w900,
-                        color: Color(0xFF94A3B8))),
+                Row(children: [
+                  const Icon(Icons.hub_outlined,
+                      color: Color(0xFF38BDF8), size: 18),
+                  const SizedBox(width: 10),
+                  const Text('Gateway Setup',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                          color: Color(0xFF38BDF8))),
+                ]),
+                const SizedBox(height: 8),
+                RichText(
+                  text: TextSpan(
+                    style: const TextStyle(
+                        color: Color(0xFF64748B),
+                        fontSize: 12,
+                        height: 1.4),
+                    children: [
+                      const TextSpan(
+                          text: 'Set client proxy to '),
+                      TextSpan(
+                          text: displayIp,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white)),
+                      const TextSpan(text: ' at port '),
+                      const TextSpan(
+                          text: '8080',
+                          style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white)),
+                    ],
+                  ),
+                ),
               ],
             ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh_rounded,
+                color: Color(0xFF38BDF8), size: 20),
+            onPressed: _getIP,
           ),
         ],
       ),
@@ -1024,7 +930,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         ? Colors.green
                         : Colors.red,
                     () => manager.setBlocked(
-                        client.id, !client.isBlocked),
+                        client.ipAddress, !client.isBlocked),
                   ),
                   _buildControlBtn(
                     Icons.speed_rounded,
@@ -1033,7 +939,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     () {
                       if (isThrottled) {
                         manager.setLimits(
-                            client.id, 0, 0);
+                            client.ipAddress, 0, 0);
                       } else {
                         _showThrottleDialog(manager, client);
                       }
@@ -1046,7 +952,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     () {
                       if (hasQuota) {
                         manager.setDataQuota(
-                            client.id, 0, 0);
+                            client.ipAddress, 0, 0);
                       } else {
                         _showQuotaDialog(manager, client);
                       }
